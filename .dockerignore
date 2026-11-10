@@ -29,5 +29,8 @@ docs/deployments
 docs/agent-data
 docs/agent-deployments
 frontend/node_modules
+frontend/coverage
+frontend/dist
+internal/web/dist
 *.log
 coverage.out

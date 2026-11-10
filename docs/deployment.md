@@ -646,6 +646,7 @@ curl --insecure --fail https://127.0.0.1:9443/healthz
 - `/healthz` 表示进程存活；
 - `/readyz` 表示 Server 初始化完成；
 - `/readyz` 会实际检查 SQLite 连接可用性和当前 Agent TLS 服务端证书，而不是返回固定成功；
+- Docker Compose 健康检查使用 `ACME_LISTEN_ADDRESS` 对应的容器内监听地址；更改端口时还需同步调整端口映射与公开地址；
 - Agent 通道的 `/healthz` 不要求客户端证书，但服务端证书仍由内部 CA 签发；
 - 健康接口不会触发外部 ACME 或 DNS 测试；
 - 阿里云 DNS 权限应通过管理端“DNS 凭据”的显式测试操作验证。

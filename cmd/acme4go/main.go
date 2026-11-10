@@ -143,8 +143,17 @@ func summarizeURL(value string) string {
 
 // runHealthcheck 从容器内部验证管理面 readiness，供无 Shell 的 distroless 镜像调用。
 func runHealthcheck() error {
-	client := &http.Client{Timeout: 2 * time.Second}
-	response, err := client.Get("http://127.0.0.1:8080/readyz")
+	address, err := config.HealthcheckListenAddress()
+	if err != nil {
+		return err
+	}
+	target, err := healthcheckURL(address)
+	if err != nil {
+		return err
+	}
+	// 健康检查必须直接访问本机监听器，不受容器代理环境变量影响。
+	client := &http.Client{Timeout: 2 * time.Second, Transport: &http.Transport{}}
+	response, err := client.Get(target)
 	if err != nil {
 		return err
 	}
@@ -153,6 +162,21 @@ func runHealthcheck() error {
 		return fmt.Errorf("readiness 返回 HTTP %d", response.StatusCode)
 	}
 	return nil
+}
+
+// healthcheckURL 将管理面监听地址转换为容器内可访问的就绪检查地址。
+func healthcheckURL(address string) (string, error) {
+	host, port, err := net.SplitHostPort(address)
+	if err != nil {
+		return "", fmt.Errorf("解析管理面监听地址: %w", err)
+	}
+	ip := net.ParseIP(host)
+	if host == "" || ip != nil && ip.IsUnspecified() && ip.To4() != nil {
+		host = "127.0.0.1"
+	} else if ip != nil && ip.IsUnspecified() {
+		host = "::1"
+	}
+	return (&url.URL{Scheme: "http", Host: net.JoinHostPort(host, port), Path: "/readyz"}).String(), nil
 }
 
 // runServer 原子占用双监听端口并协调管理面、Agent 面和后台服务的生命周期。

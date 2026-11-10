@@ -15,6 +15,67 @@ import (
 // defaultEnvFile 是未显式指定 ACME_ENV_FILE 时尝试加载的配置文件名。
 const defaultEnvFile = ".env"
 
+// HealthcheckListenAddress 只读取管理面监听地址，遵循进程环境优先于环境文件的规则。
+// 健康检查不加载或校验主密钥、密码及其他与就绪探测无关的配置。
+func HealthcheckListenAddress() (string, error) {
+	value, exists := os.LookupEnv("ACME_LISTEN_ADDRESS")
+	if !exists {
+		var err error
+		value, err = readEnvFileListenAddress()
+		if err != nil {
+			return "", err
+		}
+	}
+	if value = strings.TrimSpace(value); value == "" {
+		return defaultListenAddress, nil
+	}
+	return value, nil
+}
+
+// readEnvFileListenAddress 读取环境文件中首个监听地址，不解析或导出其他配置值。
+func readEnvFileListenAddress() (string, error) {
+	path := strings.TrimSpace(os.Getenv("ACME_ENV_FILE"))
+	explicit := path != ""
+	if !explicit {
+		path = defaultEnvFile
+	}
+	file, err := os.Open(path)
+	if errors.Is(err, os.ErrNotExist) && !explicit {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("读取环境配置文件 %s: %w", path, err)
+	}
+	defer file.Close()
+
+	scanner := bufio.NewScanner(file)
+	scanner.Buffer(make([]byte, 4096), 1024*1024)
+	lineNumber := 0
+	for scanner.Scan() {
+		lineNumber++
+		line := strings.TrimSpace(strings.TrimPrefix(scanner.Text(), "\ufeff"))
+		if strings.HasPrefix(line, "export ") {
+			line = strings.TrimSpace(strings.TrimPrefix(line, "export "))
+		}
+		name, rawValue, found := strings.Cut(line, "=")
+		if strings.TrimSpace(name) != "ACME_LISTEN_ADDRESS" {
+			continue
+		}
+		if !found {
+			return "", fmt.Errorf("环境配置文件 %s 第 %d 行格式无效", path, lineNumber)
+		}
+		value, err := parseEnvValue(strings.TrimSpace(rawValue))
+		if err != nil {
+			return "", fmt.Errorf("环境配置文件 %s 第 %d 行格式无效: %w", path, lineNumber, err)
+		}
+		return value, nil
+	}
+	if err := scanner.Err(); err != nil {
+		return "", fmt.Errorf("读取环境配置文件 %s: %w", path, err)
+	}
+	return "", nil
+}
+
 // loadEnvFile 加载 ACME_ENV_FILE 指定的文件；未指定时尝试当前目录下的 .env。
 func loadEnvFile() error {
 	path := strings.TrimSpace(os.Getenv("ACME_ENV_FILE"))
