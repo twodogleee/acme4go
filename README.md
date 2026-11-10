@@ -270,6 +270,8 @@ make all VERSION=0.1.0
 
 `make verify` 也会先安装前端依赖并构建静态资源，再运行各项检查，因此可在全新克隆后直接使用。
 
+前端开发工具的 `minimatch` 11.x 覆盖用于处理 [GHSA-g3hv-75wg-m249](https://github.com/advisories/GHSA-g3hv-75wg-m249)；目前部分上游依赖仍声明使用 10.x。项目测试会检查 ESLint 对源码、配置文件和忽略目录的实际匹配。上游发布声明支持安全版本的稳定版后，应逐项移除对应覆盖，并重新运行 `npm audit` 和前端检查。
+
 ## 安全边界
 
 - 管理员密码使用 Argon2id 加盐摘要，不可逆保存。
