@@ -6,6 +6,8 @@
 !.env.example
 .package.env
 agent.env
+/docs/compose.local.yaml
+/docs/compose.agent.local.yaml
 /acme4go
 *.key
 *.pem

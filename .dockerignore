@@ -14,6 +14,8 @@ docs/.env
 docs/agent.env
 docs/compose.yaml
 docs/compose.agent.yaml
+docs/compose.local.yaml
+docs/compose.agent.local.yaml
 docs/data
 docs/deployments
 docs/agent-data

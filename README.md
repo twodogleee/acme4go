@@ -2,9 +2,23 @@
 
 Acme4go 是面向小型团队和自托管场景的 ACME 证书控制平面。它用一个 Go 二进制和一个容器镜像完成证书申请、自动续期、加密保管及跨主机文件部署；不依赖 Java、Redis、消息队列或外部数据库。
 
-项目当前按全新架构实现，不包含 Acme4j 的数据迁移与兼容层。
+项目采用 Go、SQLite 和 Vue 3，适合从单机开始部署，也支持通过 Agent 向远程主机分发证书。项目当前按全新架构实现，不包含 Acme4j 的数据迁移与兼容层。
 
-## 设计结论
+[快速开始](#快速开始) · [远程 Agent](#部署远程-agent) · [配置](#配置) · [本地开发](#本地开发) · [安全与备份](#安全边界) · [文档导航](#文档导航)
+
+## 系统运行截图
+
+以下截图来自使用空数据初始化的演示环境。
+
+管理端概览：
+
+![Acme4go 管理端概览](docs/images/dashboard.png)
+
+证书管理：
+
+![Acme4go 证书管理](docs/images/certificates.png)
+
+## 功能概览
 
 - 一个仓库、一个二进制、一个镜像。
 - 两种运行角色：`server`、`agent`。
@@ -19,7 +33,7 @@ Acme4go 是面向小型团队和自托管场景的 ACME 证书控制平面。它
 浏览器 ── Cookie + CSRF ──> 管理面 :8080
                               │
                               ├─ SQLite / AES-256-GCM 加密证书库
-                              ├─ ACME + 阿里云 DNS-01
+                              ├─ ACME + 阿里云 / Cloudflare DNS-01
                               └─ Agent 面 :9443（HTTPS / mTLS）
                                          ▲
                                          │ 主动拉取期望状态
@@ -28,31 +42,50 @@ Acme4go 是面向小型团队和自托管场景的 ACME 证书控制平面。它
                               └─ <deployment-dir>/<alias>/current/*.pem
 ```
 
-## 五分钟启动
+## 快速开始
 
-需要 Docker 24+ 与 Docker Compose v2。
+需要 Docker 24+、Docker Compose v2 和 OpenSSL。下面的命令从源码构建本地镜像，不依赖预先发布的镜像。
 
-Compose 入口和运行目录统一放在 `docs/`。部署时直接修改 `compose.yaml` 或 `compose.agent.yaml`，不需要 `.env` 或 `agent.env`，也不需要 `--env-file`。镜像打包推送入口为项目根目录的 [`package.sh`](package.sh)，例如 `./package.sh 1.0.0`；完整用法见 [镜像构建与发布](docs/deployment.md#32-使用脚本打包并推送)。原 `docs/build-and-push-aliyun.sh` 保留为兼容入口。
+1. 克隆仓库并构建镜像：
 
 ```bash
+git clone https://github.com/twodogleee/acme4go.git
+cd acme4go
+docker build -t acme4go:local .
+```
+
+2. 复制配置模板，生成主密钥：
+
+```bash
+cp docs/compose.yaml docs/compose.local.yaml
 cd docs
 openssl rand -base64 48
-# 将主密钥、初始密码及访问地址直接填入 compose.yaml
-chmod 600 compose.yaml
+# 在 compose.local.yaml 中填写主密钥、初始密码，并将 image 改为 acme4go:local
+chmod 600 compose.local.yaml
 mkdir -p data deployments
 sudo chown -R 65532:65532 data deployments
 chmod 700 data
 chmod 750 deployments
-docker compose up -d
 ```
 
-先通过 `package.sh` 构建或推送 Compose 中指定的镜像（当前为 `ccr.ccs.tencentyun.com/36knight/acme4go:1.0.0`），私有仓库需先 `docker login ccr.ccs.tencentyun.com`。把随机结果填入 `compose.yaml` 的 `ACME_MASTER_KEY`，同时填写至少 12 位的 `ACME_ADMIN_PASSWORD`，再执行启动命令。远程访问时修改两个公开地址，默认本机访问地址为：
+将生成的随机字符串填入 `ACME_MASTER_KEY`，并填写至少 12 位的 `ACME_ADMIN_PASSWORD`。从其他主机访问时，还需将 `ACME_PUBLIC_URL` 和 `ACME_AGENT_PUBLIC_URL` 改为实际可访问的地址。`compose.local.yaml` 已被 Git 忽略，避免将本机配置误提交。
+
+3. 启动并访问管理端：
+
+```bash
+docker compose -f compose.local.yaml up -d
+docker compose -f compose.local.yaml ps
+```
+
+默认本机访问地址和账号为：
 
 - 管理端：<http://127.0.0.1:8080>
 - Agent HTTPS：<https://127.0.0.1:9443>
 - 用户名：`admin`；需要修改时在 Compose 的 `environment` 下增加 `ACME_ADMIN_USERNAME`
 
 主密钥用于解密共享凭据、ACME 账户密钥、证书私钥和内部 CA 私钥。数据目录已经生成后，不能随意修改或丢失该密钥。已有实例切换配置方式时，必须将原主密钥原样填入 Compose。填写真实凭据后的 Compose 文件应受限保存，不提交到代码仓库。
+
+如需构建并推送到自己的镜像仓库，可配置根目录的 [`package.sh`](package.sh)，并同步修改 Compose 的 `image`。模板中的镜像地址仅作为现有配置示例，不保证可公开拉取；完整说明见[镜像构建与发布](docs/deployment.md#32-使用脚本打包并推送)。
 
 ### 首次业务流程
 
@@ -70,20 +103,21 @@ docker compose up -d
 
 1. 在管理端“部署 Agent”页面创建一次性注册信息。
 2. 复制生成的 `acme4go://join/...` URL。它包含控制面地址、一次性令牌和内部 CA 证书，10 分钟后或使用一次后失效。
-3. 在目标服务器准备配置并启动同一个镜像：
+3. 在目标服务器准备源码或 Compose 模板，以及本机已构建或可拉取的镜像；复制模板后启动：
 
 ```bash
+cp docs/compose.agent.yaml docs/compose.agent.local.yaml
 cd docs
-# 在 compose.agent.yaml 中填写 ACME_AGENT_JOIN_URL，并确认 image 版本
-chmod 600 compose.agent.yaml
+# 在 compose.agent.local.yaml 中填写 ACME_AGENT_JOIN_URL，并修改 image
+chmod 600 compose.agent.local.yaml
 mkdir -p agent-data agent-deployments
 sudo chown -R 65532:65532 agent-data agent-deployments
 chmod 700 agent-data
 chmod 750 agent-deployments
-docker compose -f compose.agent.yaml up -d
+docker compose -f compose.agent.local.yaml up -d
 ```
 
-注册成功后，Agent 将身份和私钥以 `0600` 权限保存在 Compose 同级的 `./agent-data` 目录中，证书运行文件写入同级 `./agent-deployments`；注册成功后清空 `compose.agent.yaml` 中的 Join URL，后续启动不再需要它。Agent 每 30 秒主动心跳并拉取期望状态，客户端证书在到期前 30 天自动续签。撤销 Agent 后，控制面立即拒绝其证书下载请求。
+注册成功后，Agent 将身份和私钥以 `0600` 权限保存在 Compose 同级的 `./agent-data` 目录中，证书运行文件写入同级 `./agent-deployments`；注册成功后清空 `compose.agent.local.yaml` 中的 Join URL，后续启动不再需要它。Agent 每 30 秒主动心跳并拉取期望状态，客户端证书在到期前 30 天自动续签。撤销 Agent 后，控制面立即拒绝其证书下载请求。
 
 Agent 不开放端口、不使用 SSH、不访问 Docker Socket，也不执行 Nginx/EMQX reload 命令。应用负责监视文件或按自身方式重新加载。
 
@@ -124,7 +158,7 @@ deployments/
 
 ## 配置
 
-Compose 部署直接修改 YAML 中的 `environment` 字面值和 `image`、`ports`，无需另建环境文件。Server 模板只保留四项常用配置，Agent 模板只保留 Join URL，其余项使用程序内置默认值。高级配置按需添加到 `environment`，例如：
+Compose 部署直接修改本地配置副本中 `environment` 的字面值和 `image`、`ports`，无需另建环境文件。Server 模板只保留四项常用配置，Agent 模板只保留 Join URL，其余项使用程序内置默认值。高级配置按需添加到 `environment`，例如：
 
 ```yaml
 environment:
@@ -178,11 +212,11 @@ environment:
 | 配置位置 | 修改方式 |
 |---|---|
 | 顶层 `name` | 直接填写 Compose 项目名称，默认为 `acme4go` 或 `acme4go-agent` |
-| 服务的 `image` | 直接填写镜像地址和版本，当前为 `ccr.ccs.tencentyun.com/36knight/acme4go:1.0.0` |
+| 服务的 `image` | 在本地副本中填写可用的镜像地址和版本；快速开始使用本地构建的 `acme4go:local` |
 | Server 的 `ports` | 修改冒号左侧的宿主机端口，默认 `8080:8080` 和 `9443:9443`；同步调整对应公开 URL |
 | 服务的 `environment` | 直接填写配置值；需要高级参数时按上表添加相应键值 |
 
-Compose 使用程序默认的容器内端口和运行目录，并挂载对应持久化目录。首次部署填好主密钥、管理员密码和两个公开 URL；Agent 只需填写一次性 Join URL。使用 `_FILE` 时还必须由 Docker Secret、Kubernetes Secret 或额外挂载把对应文件放入容器。
+Compose 使用程序默认的容器内端口和运行目录，并挂载对应持久化目录。首次部署在本地副本填好主密钥、管理员密码和两个公开 URL；Agent 只需填写一次性 Join URL。使用 `_FILE` 时还必须由 Docker Secret、Kubernetes Secret 或额外挂载把对应文件放入容器。
 
 ### 备份与诊断
 
@@ -208,13 +242,17 @@ cd frontend && npm ci && npm run build && cd ..
 go run ./cmd/acme4go server
 ```
 
-管理端热更新：
+管理端热更新时，先在 `.env` 中设置以下值：
 
-```bash
-# .env：浏览器实际来源必须与 ACME_PUBLIC_URL 一致；端口被占用时只需同步修改监听地址
+```dotenv
+# 浏览器实际来源必须与 ACME_PUBLIC_URL 一致；端口被占用时同步修改监听地址
 ACME_LISTEN_ADDRESS=:18080
 ACME_PUBLIC_URL=http://localhost:5173
+```
 
+然后分别启动后端和前端开发服务器：
+
+```bash
 # 终端一
 go run ./cmd/acme4go server
 
@@ -255,6 +293,14 @@ make all VERSION=0.1.0
 - 如需立即恢复业务运行副本，再备份 `ACME_DEPLOYMENT_DIR`，否则恢复后可由控制面对账重新生成。
 
 不要只复制正在写入的 `acme4go.db`。推荐停止容器后复制整个 `./data` 目录，或使用 SQLite 在线备份工具。恢复时保持原主密钥和数据目录权限，再启动相同或更高版本镜像。
+
+## 文档导航
+
+- [部署与运维](docs/deployment.md)：服务端、Agent、镜像打包和运行配置。
+- [系统架构](docs/architecture.md)与[安全说明](docs/security.md)：组件职责、信任边界与安全设计。
+- [凭据管理](docs/credentials.md)与[云部署](docs/cloud-deployment.md)：DNS 验证、云证书及云资源绑定。
+- [文件部署同步](docs/file-deployment-sync.md)与[运维查询和通知](docs/operations-and-notifications.md)：证书分发、查询与告警。
+- [OpenAPI 接口定义](api/openapi.yaml)：管理 API 与 Agent API 契约。
 
 ## 当前范围
 
