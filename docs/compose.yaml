@@ -1,0 +1,42 @@
+# 直接修改此文件中的配置值，无需创建 .env。
+# @author Andersen
+name: acme4go
+
+services:
+  acme4go:
+    # 与 package.sh 推送的镜像版本保持一致。
+    image: ccr.ccs.tencentyun.com/36knight/acme4go:1.0.0
+    command: server
+    restart: unless-stopped
+    logging:
+      driver: local
+      options:
+        max-size: "20m"
+        max-file: "5"
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    environment:
+      # 必填：至少 32 字节；已有实例必须使用原主密钥，不能重新生成。
+      ACME_MASTER_KEY: ""
+      # 首次启动必填：至少 12 位；默认用户名为 admin。
+      ACME_ADMIN_PASSWORD: ""
+      # 浏览器访问地址；远程访问时改为实际域名或服务器 IP。
+      ACME_PUBLIC_URL: "http://127.0.0.1:8080"
+      # 远程 Agent 必须能访问此地址，注册前改为服务器实际域名或 IP。
+      ACME_AGENT_PUBLIC_URL: "https://127.0.0.1:9443"
+    ports:
+      # 修改宿主机端口时调整冒号左侧，并同步修改上面的公开地址。
+      - "8080:8080"
+      - "9443:9443"
+    volumes:
+      - ./data:/app/data
+      - ./deployments:/app/deployments
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "/app/acme4go", "healthcheck"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 20s

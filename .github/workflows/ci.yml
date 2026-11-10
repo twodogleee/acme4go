@@ -1,0 +1,38 @@
+# 前后端持续集成：类型、规范、测试、竞态检查和生产构建。
+# @author Andersen
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: 安装前端依赖
+        run: npm ci
+        working-directory: frontend
+      - name: 前端规范与单元测试
+        run: npm run comment-audit && npm run lint && npm test
+        working-directory: frontend
+      - name: 前端生产构建
+        run: npm run build
+        working-directory: frontend
+      - name: Go 规范、静态检查和测试
+        run: go run ./scripts/comment-audit.go . && go run -tags openapiaudit ./scripts/openapi-audit.go && go vet ./... && go test ./...
+      - name: Go 竞态检查
+        run: go test -race ./...

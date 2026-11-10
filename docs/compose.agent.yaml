@@ -1,0 +1,25 @@
+# 直接修改镜像和一次性 Join URL，无需创建 agent.env。
+# @author Andersen
+name: acme4go-agent
+
+services:
+  agent:
+    image: ccr.ccs.tencentyun.com/36knight/acme4go:1.0.0
+    command: agent
+    restart: unless-stopped
+    logging:
+      driver: local
+      options:
+        max-size: "20m"
+        max-file: "5"
+    read_only: true
+    tmpfs:
+      - /tmp:size=8m,mode=1777
+    environment:
+      # 首次启动填入管理端生成的完整 acme4go://join/...，注册成功后清空。
+      ACME_AGENT_JOIN_URL: ""
+    volumes:
+      - ./agent-data:/app/data
+      - ./agent-deployments:/app/deployments
+    security_opt:
+      - no-new-privileges:true
