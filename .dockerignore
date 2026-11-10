@@ -2,7 +2,9 @@
 .gitignore
 .idea
 .vscode
+AGENTS.md
 .env
+.env.*
 .package.env
 agent.env
 bin
@@ -16,6 +18,12 @@ docs/compose.yaml
 docs/compose.agent.yaml
 docs/compose.local.yaml
 docs/compose.agent.local.yaml
+docs/implementation-verification.md
+docs/p0-p1-review-findings.md
+docs/recovery-review-findings.md
+docs/review-findings.md
+docs/review-followup-findings.md
+docs/ui-detail-review.md
 docs/data
 docs/deployments
 docs/agent-data

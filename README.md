@@ -57,7 +57,9 @@ docker build -t acme4go:local .
 2. 复制配置模板，生成主密钥：
 
 ```bash
-cp docs/compose.yaml docs/compose.local.yaml
+if [ ! -e docs/compose.local.yaml ] && [ ! -L docs/compose.local.yaml ]; then
+  (umask 077; cp docs/compose.yaml docs/compose.local.yaml)
+fi
 cd docs
 openssl rand -base64 48
 # 在 compose.local.yaml 中填写主密钥、初始密码，并将 image 改为 acme4go:local
@@ -106,7 +108,9 @@ docker compose -f compose.local.yaml ps
 3. 在目标服务器准备源码或 Compose 模板，以及本机已构建或可拉取的镜像；复制模板后启动：
 
 ```bash
-cp docs/compose.agent.yaml docs/compose.agent.local.yaml
+if [ ! -e docs/compose.agent.local.yaml ] && [ ! -L docs/compose.agent.local.yaml ]; then
+  (umask 077; cp docs/compose.agent.yaml docs/compose.agent.local.yaml)
+fi
 cd docs
 # 在 compose.agent.local.yaml 中填写 ACME_AGENT_JOIN_URL，并修改 image
 chmod 600 compose.agent.local.yaml

@@ -59,7 +59,7 @@ openssl rand -base64 48
 
 ### 2.1 选择公开地址
 
-管理地址和 Agent 地址是两个独立配置，直接修改 `compose.yaml` 的 `environment`：
+管理地址和 Agent 地址是两个独立配置，在第 4.1 节创建的 `compose.local.yaml` 中修改 `environment`：
 
 ```yaml
 environment:
@@ -124,11 +124,11 @@ chmod 750 docs/agent-deployments
 
 首次部署可以跳过本节。如果旧版本已经使用 Docker 命名卷，切换到 `./data`、`./deployments`、`./agent-data` 和 `./agent-deployments` 前必须先迁移。不要在迁移前执行 `docker compose down -v` 或删除旧卷。
 
-先进入部署目录并停止 Server，避免复制正在写入的 SQLite：
+先进入部署目录并使用旧实例实际使用的 Compose 文件停止 Server，避免复制正在写入的 SQLite。以下假设旧文件名为 `compose.yaml`；如果使用其他文件名，请调整 `-f` 参数：
 
 ```bash
 cd docs
-docker compose stop acme4go
+docker compose -f compose.yaml stop acme4go
 docker volume ls | grep acme4go
 ```
 
@@ -168,6 +168,7 @@ OLD_AGENT_DEPLOYMENT_VOLUME='your_project_acme4go-agent-deployments'
 
 docker volume inspect "$OLD_AGENT_DATA_VOLUME" "$OLD_AGENT_DEPLOYMENT_VOLUME"
 
+# 使用旧 Agent 实例实际使用的 Compose 文件，此处假设旧文件名为 compose.agent.yaml。
 docker compose -f compose.agent.yaml stop agent
 mkdir -p agent-data agent-deployments
 sudo chown -R 65532:65532 agent-data agent-deployments
@@ -262,7 +263,15 @@ DOCKER_NO_INTERACTIVE=true \
 
 单节点模式默认启用本机执行器。管理端、ACME 调度、Agent API 与本机证书部署位于同一进程，但两个网络入口仍然分离。
 
-直接编辑 [`compose.yaml`](compose.yaml)。常用配置只有主密钥、首次管理员密码和两个访问地址；其余应用参数使用内置默认值。文件没有外部环境变量引用，不需要 `.env` 或 `--env-file`。
+从仓库根目录复制 [`compose.yaml`](compose.yaml) 模板到本地配置副本；如果副本已经存在，不会覆盖已有配置：
+
+```bash
+if [ ! -e docs/compose.local.yaml ] && [ ! -L docs/compose.local.yaml ]; then
+  (umask 077; cp docs/compose.yaml docs/compose.local.yaml)
+fi
+```
+
+编辑 `docs/compose.local.yaml`。常用配置只有主密钥、首次管理员密码和两个访问地址；其余应用参数使用内置默认值。文件没有外部环境变量引用，不需要 `.env` 或 `--env-file`。
 
 ```yaml
 environment:
@@ -280,16 +289,16 @@ environment:
 
 ```bash
 cd docs
-chmod 600 compose.yaml
+chmod 600 compose.local.yaml
 mkdir -p data deployments
 sudo chown -R 65532:65532 data deployments
 chmod 700 data
 chmod 750 deployments
-docker compose up -d
-docker compose logs -f acme4go
+docker compose -f compose.local.yaml up -d
+docker compose -f compose.local.yaml logs -f acme4go
 ```
 
-Compose 直接绑定同级 `./data` 和 `./deployments`，对应容器内 `/app/data`、`/app/deployments`，与程序默认路径一致。原 `.env` 中的主密钥、公开地址、通知等自定义配置需显式迁入 Compose 才会继续生效。真实凭据仅填写在受控部署副本中，不提交到代码仓库；这两个 Compose 文件已从 Docker 构建上下文排除。值中若包含字面量美元符号，按 Compose 语法写为 `$$`。
+Compose 直接绑定同级 `./data` 和 `./deployments`，对应容器内 `/app/data`、`/app/deployments`，与程序默认路径一致。原 `.env` 中的主密钥、公开地址、通知等自定义配置需显式迁入 Compose 才会继续生效。真实凭据仅填写在受控部署副本中，不提交到代码仓库；本地副本已从 Git 和 Docker 构建上下文排除。值中若包含字面量美元符号，按 Compose 语法写为 `$$`。
 
 检查状态：
 
@@ -305,7 +314,7 @@ curl --insecure --fail https://127.0.0.1:9443/healthz
 
 ### 4.2 纯控制平面 Server
 
-如果 Server 不应在本机写出业务证书，在 `compose.yaml` 现有 `environment` 下增加一行：
+如果 Server 不应在本机写出业务证书，在 `compose.local.yaml` 现有 `environment` 下增加一行：
 
 ```yaml
 ACME_LOCAL_DEPLOYMENT_ENABLED: "false"
@@ -363,7 +372,15 @@ Join URL 包含：
 
 ### 5.3 使用 Docker Compose 启动 Agent
 
-目标主机只需要 [`compose.agent.yaml`](compose.agent.yaml)，无需 `agent.env`。直接修改 `image` 为实际发布的镜像，并在 `environment` 中填入管理端刚生成的完整 Join URL：
+目标主机需要 [`compose.agent.yaml`](compose.agent.yaml) 模板，无需 `agent.env`。在仓库根目录执行以下命令，复制模板；如果本地副本已经存在，不会覆盖已有配置：
+
+```bash
+if [ ! -e docs/compose.agent.local.yaml ] && [ ! -L docs/compose.agent.local.yaml ]; then
+  (umask 077; cp docs/compose.agent.yaml docs/compose.agent.local.yaml)
+fi
+```
+
+如果目标主机没有仓库，先将模板复制到部署目录，再创建同名本地副本。修改 `compose.agent.local.yaml` 的 `image` 为实际发布的镜像，并在 `environment` 中填入管理端刚生成的完整 Join URL：
 
 ```yaml
 environment:
@@ -374,23 +391,23 @@ environment:
 
 ```bash
 cd docs
-chmod 600 compose.agent.yaml
+chmod 600 compose.agent.local.yaml
 mkdir -p agent-data agent-deployments
 sudo chown -R 65532:65532 agent-data agent-deployments
 chmod 700 agent-data
 chmod 750 agent-deployments
 # 私有仓库首次拉取前登录
 docker login ccr.ccs.tencentyun.com
-docker compose -f compose.agent.yaml pull
-docker compose -f compose.agent.yaml up -d
-docker compose -f compose.agent.yaml logs -f agent
+docker compose -f compose.agent.local.yaml pull
+docker compose -f compose.agent.local.yaml up -d
+docker compose -f compose.agent.local.yaml logs -f agent
 ```
 
 默认镜像为 `ccr.ccs.tencentyun.com/36knight/acme4go:1.0.0`。Agent 名称在管理端生成注册信息时填写；日志出现“Agent 注册成功”和“Agent 已启动”后，回到管理端确认节点 `ONLINE`、平台和版本正确、最后在线时间持续更新。
 
 身份、客户端证书和私钥保存在 Compose 同级 `./agent-data` 中，部署文件保存在 `./agent-deployments` 中，分别绑定到 `/app/data` 和 `/app/deployments`。目录必须授予 UID/GID `65532`；身份目录必须持久化，且不能同时供多个 Agent 副本使用。
 
-注册成功后直接清空 `compose.agent.yaml` 中的一次性 Join URL：
+注册成功后直接清空 `compose.agent.local.yaml` 中的一次性 Join URL：
 
 ```yaml
 ACME_AGENT_JOIN_URL: ""
@@ -399,7 +416,7 @@ ACME_AGENT_JOIN_URL: ""
 重新创建容器，使一次性凭据从容器环境中移除：
 
 ```bash
-docker compose -f compose.agent.yaml up -d --force-recreate
+docker compose -f compose.agent.local.yaml up -d --force-recreate
 ```
 
 只要原身份目录继续挂载，后续启动不再需要 Join URL。身份目录丢失时，需撤销旧 Agent、生成新 Join URL 并重新注册。轮询、日志级别等高级配置仅在需要时直接添加到 Compose 的 `environment` 下。
@@ -551,7 +568,7 @@ services:
 
 ```text
 docs/
-├── compose.agent.yaml
+├── compose.agent.local.yaml
 ├── agent-data/
 └── agent-deployments/
 ```
@@ -637,8 +654,8 @@ Docker 日志：
 
 ```bash
 cd docs
-docker compose logs -f acme4go
-docker compose -f compose.agent.yaml logs -f agent
+docker compose -f compose.local.yaml logs -f acme4go
+docker compose -f compose.agent.local.yaml logs -f agent
 ```
 
 Server 和 Agent 的 Compose 配置统一使用 Docker `local` 日志驱动。每个日志分片最大 `20 MB`，每个容器最多保留 `5` 个分片，旧分片由 Docker 自动压缩并在超出数量后删除，因此单个容器最多保留约 `100 MB` 的控制台日志。日志仍通过上述 `docker compose logs` 命令查看，不需要挂载或维护应用日志目录。
@@ -646,8 +663,8 @@ Server 和 Agent 的 Compose 配置统一使用 Docker `local` 日志驱动。�
 日志驱动参数只在创建容器时生效。升级包含该配置的 Compose 文件后，需要重新创建现有容器：
 
 ```bash
-docker compose up -d --force-recreate
-docker compose -f compose.agent.yaml up -d --force-recreate
+docker compose -f compose.local.yaml up -d --force-recreate
+docker compose -f compose.agent.local.yaml up -d --force-recreate
 ```
 
 systemd Agent 日志：
@@ -730,7 +747,7 @@ Join URL 十分钟过期且只能使用一次。回到管理端重新生成，�
 - `./agent-data` 目录是否仍然存在；
 - 新容器是否把正确目录挂载到 `/app/data`；
 - 直接运行时 `ACME_DATA_DIR` 是否发生变化；
-- 是否在另一个工作目录复制了 `compose.agent.yaml`，导致同级相对挂载路径指向新的空目录。
+- 是否在另一个工作目录复制了 `compose.agent.local.yaml`，导致同级相对挂载路径指向新的空目录。
 
 如果原身份目录已经丢失，应在管理端撤销旧 Agent，然后生成新 Join URL 重新注册。
 
